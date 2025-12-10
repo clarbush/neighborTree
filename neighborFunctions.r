@@ -8,7 +8,7 @@
 
 ## param: takes a square distance matrix
 ## takes a matrix and makes it into a Q matrix 
-## returns Q matrix, new node and dist from original to that node 
+## returns Q matrix 
 
 makeQ <- function(dist) {
   #get the size
@@ -20,7 +20,9 @@ makeQ <- function(dist) {
   
   #set up Q return 
   Q <- matrix(data = NA, nrow = n, ncol = n)
-  
+  row.names(Q) <- row.names(dist)
+  colnames(Q) <- colnames(dist)
+                   
   # runs through all rows 
   for (a in 1:n) {
     for(b in 1:n) { 
@@ -42,48 +44,107 @@ makeQ <- function(dist) {
   
 
 ## param: takes a Q matrix, and original distance matrix
-## takes smallest element, and joins those nodes
-## returns: distance from original nodes to new node
+## takes smallest element, and joins those nodes, calculates distances
+## returns: distance from original nodes to new node,
+## to a larger as a dataframe that can be added 
 
 joinNode <- function(Q, dist) {
   
-  #takes first location for min, returns row and col index
+  #takes first (smallest) location for min, returns row and col index
   Qmin <- which( Q == min(Q), arr.ind = TRUE)[1,]
   n <- nrow(dist)
   
-  aDist <- dist[Qmin][1]
+  a <- Qmin[1]
+  b <- Qmin[2]
   
+  abDist <- dist[a,b]
+  
+  # Nodes 
+  nodeA <- rownames(dist)[a]
+  nodeB <- rownames(dist)[b]
+  
+  #row/col sums
   rows <- rowSums(dist)
   cols <- colSums(dist)
   
-  firstD <- .5* aDist + 1/(2*(n-2)) *(rows[1] - rows[2])
-  secondD <- aDist - firstD
+  #edge distance - from wikipedia
+  firstD <- .5* abDist + 1/(2*(n-2)) *(rows[a] - rows[b])
+  secondD <- abDist - firstD
   
-  return (list)
+  newNode <- paste(nodeA, "_",nodeB, sep = '')
+  
+  #edges that have been made 
+  nodeDF <- data.frame(parent = c(newNode, newNode),
+                       child = c(nodeA, nodeB),
+                       distance = c(firstD, secondD))
+  
+  return(nodeDF)
 }
 
-## Takes Q matrix, and original distance matrix, 
+## params: Takes Q matrix, and original distance matrix, 
 ## and makes new matrix that is n-1 from dist size, adding in 
+## returns the new distance matrix 
 newDist <- function(Q, dist) {
+  
+  #get smallest distance, and return what nodes those are 
   n <- nrow(dist)
   Qmin <- which( Q == min(Q), arr.ind = TRUE)[1,]
-  a <- Qmin[2]
-  b <- Qmin[1]
+  a <- Qmin[1]
+  b <- Qmin[2]
   
-  #drops row and col to make smaller matrix
-  newD <- dist[-b,-a]
-  newN<- nrow(newD)
-  diff <- nrow(dist) - nrow(newD)
+  #Get new names
+  nodeA <- rownames(dist)[a]
+  nodeB <- rownames(dist)[b]
+  newNode <- paste(nodeA, "_",nodeB, sep = '')
   
-  #update left behind row/col but leave other distances the same 
-  for(c in 1:nrow(newD) ) {
-    #add 1 to account for removed row
-    newD[a, c] <- .5*(dist[a, c+1] + dist[b, c+1] - dist[a,b])
-    newD[c,a] <- newD[a, c]
+  #new distances
+  newLength <- c()
+  oldNames <- rownames(dist)[-c(a,b)]
+  
+  for (i in oldNames) {
+    ind <- which(rownames(dist) == i) 
+    newLength <- c(newLength, .5* (dist[a, ind] + dist[b, ind] - dist[a,b]))
   }
+  
+  #build out distance matrix 
+  
+  newD<- matrix(0, n - 1, n - 1)
+  rownames(newD) <- c(newNode, oldNames)
+  colnames(newD) <- c(newNode, oldNames)
+  
+  #new dist
+  newD[1, -1] <- newLength
+  newD[-1, 1] <- newLength
+  
+  #old dist
+  oldDist <- dist[-c(a,b), -c(a,b)]
+  newD[-1,-1] <- oldDist
+  
   
   return(newD)
 }
+
+
+# graph output from the tree
+
+graphTree <- function(tree, vsize = 20) {
+  library(igraph)
+  
+  g <- graph_from_data_frame(tree, directed = FALSE)
+  
+  #add distances to plot
+  E(g)$label <- round(E(g)$distance, 3)   
+  
+  plot(
+    g,
+    vertex.size = vsize,
+    edge.arrow.mode = 0,                  
+    layout = layout_as_tree(g, root = V(g)[1]) 
+  )
+  
+  
+}
+
 
 
 ## *~*~*~*~*~ Main function 
@@ -91,21 +152,47 @@ newDist <- function(Q, dist) {
 neighborTree <- function(dist) {
   #set up first distance
   orignialDist <- dist
-  newDist <- dist
+  newD <- dist
+  
+  # #Set up matrix to hold final tree info
+   tree <- data.frame(
+     parent = character(),
+     child = character(), 
+     distance = numeric()
+   )
+  # 
+  
+
   
   print(dist)
   #Generally, run until no more new nodes can be made. 
-  while(nrow(newDist) > 2)  {
+  
+  while(nrow(newD) > 2)  {
     #Get Q
-    Q <- makeQ(newDist)
-    print(Q)
+    Q <- makeQ(newD)
     
-    #nodes? 
+    #nodes 
+    joinInfo <- joinNode(Q, newD)
+    tree <- rbind(tree, joinInfo)
+    
+    print(tree)
     
     #get new distance 
-    newDist <- newDist(Q, newDist)
-    print(newDist)
+    newD <- newDist(Q, newD)
+    
+    print(newD)
   }
+  
+  #add last nodes
+  lastNodes <- rownames(newD)
+  lastDist <- newD[1,2]
+  newNode <- paste(lastNodes[1],"_",lastNodes[2], sep = '')
+  
+  tree<- rbind(tree, 
+               data.frame(parent=newNode, child=lastNodes[1], distance=lastDist),
+               data.frame(parent=newNode, child=lastNodes[2], distance=lastDist))
+  
+  return(tree)
   
   
 }
@@ -126,6 +213,9 @@ wiki <- matrix(
 firstOne<- makeQ(wiki)
 firstOne
 
+firstNewNode <- joinNode(firstOne, wiki)
+firstNewNode
+
 second <- newDist(Q= firstOne,dist = wiki)
 second
 
@@ -141,4 +231,6 @@ thirdQ
 fourth <- newDist(thirdQ, third)
 fourth
 
-neighborTree(wiki)
+tree <- neighborTree(wiki)
+
+graphTree(tree)

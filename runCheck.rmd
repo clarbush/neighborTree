@@ -27,6 +27,7 @@ wiki <- matrix(
   byrow = TRUE,
   dimnames = list(c('a','b','c','d','e'), c('a','b','c','d','e'))
 )
+wiki
 ```
 
 
@@ -39,5 +40,62 @@ firstQ <- makeQ(wiki)
 firstQ
 ```
 
+
+```{r}
+  Qmin <- which( firstQ == min(firstQ), arr.ind = TRUE)[1,]
+  Qmin
+  n <- nrow(wiki)
+  
+  aDist <- wiki[Qmin][1]
+  aDist
+  rows <- rowSums(wiki)
+  cols <- colSums(wiki)
+  
+  firstD <- .5* aDist + 1/(2*(n-2)) *(rows[1] - rows[2])
+  firstD
+  
+  d2 <- wiki[-Qmin[1], -Qmin[2]]
+  d2
+  d2[Qmin[2], Qmin[1]]
+  
+ 
+```
+```{r}
+a = Qmin[2]
+b = Qmin[1]
+
+ for(c in 1:nrow(d2) ) {
+    #add 1 to account for removed row
+  d2[a, c] <- .5*(wiki[a, c+1] + wiki[b, c+1] - wiki[a,b])
+  d2[c,a] <- d2[a, c]
+  }
+
+  d2
+  
+paste(row.names(wiki)[1] ,row.names(wiki)[2])
+  
+```
+```{r}
+list(
+    edges = data.frame(
+      parent = c("v1","v1","v2","v2","v3"),
+      child  = c("a","b","c","d","e"),
+      weight = c(2,3,4,4,3)
+    ),
+    root = "v1"
+  )
+
+```
+
+
+
+```{r}
+library(igraph)
+g <- make_graph(
+  ~ Alice - Boris:Himari:Moshe, Himari - Alice:Nang:Moshe:Samira,
+  Ibrahim - Nang:Moshe, Nang - Samira
+)
+plot(g)
+```
 
 
