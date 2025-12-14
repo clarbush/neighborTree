@@ -89,13 +89,8 @@ list(
 
 
 
-```{r}
-library(igraph)
-g <- make_graph(
-  ~ Alice - Boris:Himari:Moshe, Himari - Alice:Nang:Moshe:Samira,
-  Ibrahim - Nang:Moshe, Nang - Samira
-)
-plot(g)
-```
+\delta(f,u) = .5d(f,g) + \frac{1}{2(n-2)}[\sum^n_{k=1}d(f,k) - \sum^n_{k=1}d(g,k)]
+\delta(g,u) = d(f,g) - \delta(f,u)
+
 
 
