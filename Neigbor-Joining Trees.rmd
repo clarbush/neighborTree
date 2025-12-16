@@ -1,0 +1,320 @@
+---
+title: "Neighbor-Joining Trees - https://github.com/clarbush/neighborTree"
+author: "Clare Bushman"
+date: "2025-12-14"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+  Neighbor joining works to solve the issue of "reconstructing phylogenetic trees from evolutionary distance data." From a distance matrix consisting of taxa, or neighbors, it takes an unresolved tree and attempts to find the minimum evolution topography. Prior to neighbor tree joining, algorithms would often try every possible branching pattern or require starting points based on educated guesses at the true tree. These would be very costly in terms of time, or impossible since we cannot know a true tree for real world datasets. 
+
+  In "The Neighbor-joining Method: A New Method for Reconstructing Phylogenetic Trees," authors Naruya Saitou and Masatoshi Nei pioneered a new method that follows the principle of minimum evolution to create a phylogenetic tree with both branch lengths and a usually efficient way to producing the sought-after tree topology. As well as producing solid trees, it had the advantages of being much faster than previous methods of least squares, maximum parsimony, and maximum likelihood, with an efficiency of O($n^3$). And, as long as the input taxa have a distance matrix that is 'nearly additive,' the output tree will produce the correct tree topology, meaning that it is statically consistent with many evolutionary models. 
+  
+  The algorithm itself is fairly simple, and follows these steps, as outlined on Wikipedia: 
+  
+  1. From the current distance matrix $d$, calculate a nxn matrix Q $$Q(i,j) = (n-2)d(i,j) - \sum^n_{k=1} d(i,k) - \sum^n_{k=1} d(j,k)$$ 
+  
+  2. Take the distinct taxa i and j where $Q(i,j)$ is the smallest. Create a new node joining them, and connect that node to the central node.  
+  
+  3. Calculate the distance from each of the taxa in the pair to this new node. 
+  
+  $$ \delta(f,u) = \frac{1}{2}d(f,g) + \frac{1}{2(n-2)} \left[  \sum^n_{k=1}d(f,k) -  \sum^n_{k=1}d(g,k) \right] \text{ and } \delta(g,u) = d(f,g) - \delta(f,u)$$
+  
+  4. Calculate the distance from each of the taxa outside of this pair to the new node. 
+   $$ d(u,k) = \frac{1}{2} [ d(f,k) + d(g,k) - d(f,g)]$$
+  5. Repeat until all nodes are connected - the final tree will have 2n- 2 edges
+  
+## Code Design 
+
+To implement, it was natural to break each of the above steps into a separate function, and then have them contained within a main function that would repeat each step, collecting the new nodes and edges as they were created, until the natural conclusion was reached. Those collected edges and nodes could then be displayed with igraph, which was chosen mainly due to an early hope to display each nodes creation and how the tree would evolve step by step. That was never implemented, but igraph remained. For sake of brevity, each function will be referenced but not recreated here.  
+
+### From the current distance matrix, create a Q matrix 
+
+```{r include=FALSE}
+## param: takes a square distance matrix
+## takes a matrix and makes it into a Q matrix 
+## returns Q matrix 
+
+makeQ <- function(dist) {
+  #get the size
+  n <- nrow(dist)
+  
+  #get row sums
+  rows <- rowSums(dist)
+  cols <- colSums(dist)
+  
+  #set up Q return 
+  Q <- matrix(data = NA, nrow = n, ncol = n)
+  row.names(Q) <- row.names(dist)
+  colnames(Q) <- colnames(dist)
+                   
+  # runs through all rows 
+  for (a in 1:n) {
+    for(b in 1:n) { 
+      
+      #skip over diagonals 
+      if(a == b) {
+        Q[a,b] = 0
+        
+      #uses formula from wikipedia
+      }else{
+      Q[a,b] = (n-2)* dist[a,b] - rows[a] - cols[b]
+      }
+    }
+  }
+
+ return(Q)
+}
+  
+```
+
+The first function, makeQ, takes a distance matrix, and follows through the formula to fill in each entry for the Q matrix. Taking the intuitive path of just using a for loop, it was fairly simple to just have it compute each cell. Possibly, some efficiency could be gained by using an apply here instead, but that would have to be benchmarked. Similarly, there's probably a way to have it just calculate for the upper half and then copy those over to the symmetrical lower half, but that was decided to be perhaps overkill at this stage.
+
+### Take the distinct taxa i and j where $Q(i,j)$ is the smallest. Create a new node joining them, and connect that node to the central node. Also, calculate the distance from each of the taxa in the pair to this new node. 
+```{r include=FALSE}
+## param: takes a Q matrix, and original distance matrix
+## takes smallest element, and joins those nodes, calculates distances
+## returns: distance from original nodes to new node,
+## to a larger as a dataframe that can be added 
+
+joinNode <- function(Q, dist) {
+  
+  #takes first (smallest) location for min, returns row and col index
+  Qmin <- which( Q == min(Q), arr.ind = TRUE)[1,]
+  n <- nrow(dist)
+  
+  a <- Qmin[1]
+  b <- Qmin[2]
+  
+  abDist <- dist[a,b]
+  
+  # Nodes 
+  nodeA <- rownames(dist)[a]
+  nodeB <- rownames(dist)[b]
+  
+  #row/col sums
+  rows <- rowSums(dist)
+  cols <- colSums(dist)
+  
+  #edge distance - from wikipedia
+  firstD <- .5* abDist + 1/(2*(n-2)) *(rows[a] - rows[b])
+  secondD <- abDist - firstD
+  
+  newNode <- paste(nodeA, "_",nodeB, sep = '')
+  
+  #edges that have been made 
+  nodeDF <- data.frame(parent = c(newNode, newNode),
+                       child = c(nodeA, nodeB),
+                       distance = c(firstD, secondD))
+  
+  return(nodeDF)
+}
+```
+
+In joinNode, given the Q matrix and distance matrix from which Q was calculated, the function looks for the smallest Q value. If the Q matrix has more than one entry with the same smallest value, it will ignore the second and only grab that first entry. As this matched what was outlined in the paper and the Wikipedia article, it produces trees that agree with those. It then saves that distance from the two smallest nodes, as well as the nodes themselves. 
+
+Then, it uses the formulas to calculate those new distances, and saves them. A new node is created, which for easy traceback is named after the two nodes it joins. In larger matrices, this becomes unbearably unreadable pretty quickly. Other names could be implemented pretty easily - by saving the original distance matrix size, it wouldn't be too difficult to pre-name the new nodes and know how many would be needed. But that also falls under the category of "could be handled later if wanted," as more of a quality of life upgrade than a program breaking flaw. 
+
+The function then aggregates the information created into a dataframe that will be added as two rows of the final tree. Each row includes the parent node, which is the newly created node, and then the child node, which is one fo the two original nodes, with the distance bewteen the parent and child saved as well. 
+
+
+###  Calculate the distance from each of the taxa outside of this pair to the new node. 
+
+```{r include=FALSE}
+library(igraph)
+library(ape)
+## params: Takes Q matrix, and original distance matrix, 
+## and makes new matrix that is n-1 from dist size, adding in 
+## returns the new distance matrix 
+newDist <- function(Q, dist) {
+  
+  #get smallest distance, and return what nodes those are 
+  n <- nrow(dist)
+  Qmin <- which( Q == min(Q), arr.ind = TRUE)[1,]
+  a <- Qmin[1]
+  b <- Qmin[2]
+  
+  #Get new names
+  nodeA <- rownames(dist)[a]
+  nodeB <- rownames(dist)[b]
+  newNode <- paste(nodeA, "_",nodeB, sep = '')
+  
+  #new distances
+  newLength <- c()
+  oldNames <- rownames(dist)[-c(a,b)]
+  
+  for (i in oldNames) {
+    ind <- which(rownames(dist) == i) 
+    newLength <- c(newLength, .5* (dist[a, ind] + dist[b, ind] - dist[a,b]))
+  }
+  
+  #build out distance matrix 
+  
+  newD<- matrix(0, n - 1, n - 1)
+  rownames(newD) <- c(newNode, oldNames)
+  colnames(newD) <- c(newNode, oldNames)
+  
+  #new dist
+  newD[1, -1] <- newLength
+  newD[-1, 1] <- newLength
+  
+  #old dist
+  oldDist <- dist[-c(a,b), -c(a,b)]
+  newD[-1,-1] <- oldDist
+  
+  
+  return(newD)
+}
+
+
+```
+The function newDist then takes a Q matrix and a distance matrix, and creates a new distance matrix based off of the Q. It replicates some of the work done in joinNode - there was an opportunity to have joinNode be split into two functions, one which just did the first bit of work and one that actually returned the new node information, but it felt more readable to have newDist just also do some of the work of finding the smallest Q value and those nodes. A particularly annoying bug here was newDist was saving the new node name slightly differently than joinNode, meaning all output from the main function was unconnected three node trees. That, and realizing how simple a fix it was, was possibly one of the most aggravating moments of this function. 
+
+Once the smallest distance, and associated nodes, have been found, with the newNode renamed to match the naming in joinNode, the unchanged nodes are saved as a list, which gives us the starting point for finding the new distances from that new node to all the unchanged ones. We can then use the formula to pull out all of the new distances.
+
+Then, the new distance matrix will be n-1 from the old matrix, where the first row will be the newly created node, and all the other rows will be the old nodes excepting the nodes that newNode connects. We can then fill in the new distances symmetrically, since we saved them as distances from new to old. 
+
+This will finally return a symmetric distance matrix, one smaller than the old matrix. 
+
+### Various helper functions 
+
+```{r include=FALSE}
+graphTree <- function(tree, vsize = 20) {
+  
+  g <- graph_from_data_frame(tree, directed = FALSE)
+  
+  #add distances to plot
+  E(g)$label <- round(E(g)$distance, 3)   
+  
+  plot(
+    g,
+    vertex.size = vsize,
+    vertex_label = NA,
+    edge.arrow.mode = 0,                  
+    layout = layout_as_tree(g, root = V(g)[length(V(g))]) 
+  )
+  
+}
+```
+
+Before getting in the main function, a quick description of the other helper functions. 
+
+graphTree completes that final step of taking the dataframe tree object, and actually graphing it. Mainly, it just runs some functions from igraph, turning the dataframe into a graph, and then plotting it using the option to tell igraph it is a tree, with the edge labels as the distances, and the root of the tree as that last child in our tree, which will be that last node from the original data matrix. Different tree shapes can be played with by switching out that root - this one just seemed fairly straightforward. 
+
+The last helper function is randomDist, which just uses ape to build out a random distance matrix of size n, as a way to try out my function with larger taxa.  
+
+### Main function 
+```{r include=FALSE}
+###############################################################################
+## *~*~*~*~*~ Main function 
+
+neighborTree <- function(dist) {
+  #set up first distance
+  orignialDist <- dist
+  newD <- dist
+  
+  # #Set up matrix to hold final tree info
+   tree <- data.frame(
+     parent = character(),
+     child = character(), 
+     distance = numeric()
+   )
+  # 
+  
+  #print(dist)
+  
+  #Generally, run until no more new nodes can be made. 
+  
+  while(nrow(newD) > 2)  {
+    #Get Q
+    Q <- makeQ(newD)
+    
+    #print(Q)
+    
+    #nodes 
+    joinInfo <- joinNode(Q, newD)
+    tree <- rbind(tree, joinInfo)
+    
+    #print(tree)
+    
+    #get new distance 
+    newD <- newDist(Q, newD)
+    
+    #print(newD)
+  }
+  
+  #add last nodes
+  lastNodes <- rownames(newD)
+  lastDist <- newD[1,2]
+  newNode <- paste(lastNodes[1],"_",lastNodes[2], sep = '')
+  
+  tree<- rbind(tree, 
+               data.frame(parent=newNode, child=lastNodes[1], distance=lastDist),
+               data.frame(parent=newNode, child=lastNodes[2], distance=lastDist))
+  
+  return(tree)
+  
+  
+}
+
+
+```
+
+
+Now that all of our helper functions are set up, they can be implemented into the main function neighborTree. The main function only requires an initial distance matrix as input; everything else is calculated. 
+
+It starts by saving that original distance matrix, and then setting newD to that original distance matrix as well - newD will be updated each loop, and we need to start it as our input distance matrix. We then set up our dataframe to hold the tree output - it has the exact same structure as joinNode's output, of a dataframe that holds parent, child, and the distance between them. 
+
+The main loop of the function executes for as long as our distance matrix has more than two rows. Within the loop, it calls makeQ, saving the Q matrix simply as Q. It then calls joinNode, using the newly made Q and the newD matrix. That output, which is our new node and the distances, is saved as joinInfo and then bound into the final tree output. Finally, we save newD as an actual new distance matrix, and then the loop starts again until we have only two nodes left.
+
+Outside of that loop, the last stage of building out the final tree is to add in those last two nodes with a final distance calculation between them. The tree is updated one last time, to include those last two rows, and then the tree is returned. The output will look like the below output, which matches the distances from the wiki example tree.
+
+```{r echo=FALSE}
+wiki <- matrix(
+  c(0,5,9,9,8,
+    5,0,10,10,9,
+    9,10,0,8,7,
+    9,10,8,0,3,
+    8,9,7,3,0),
+  ncol = 5,
+  byrow = TRUE,
+  dimnames = list(c('a','b','c','d','e'), c('a','b','c','d','e'))
+)
+
+tree <- neighborTree(wiki)
+tree
+```
+That can then be graphed with the helper function, giving us the tree itself 
+
+```{r}
+graphTree(tree)
+
+```
+This can be compared with the wiki example image. 
+
+
+```{r, echo=FALSE, out.width="50%", fig.cap="Example final tree from wiki"}
+knitr::include_graphics("WikiTree.png")
+```
+
+
+## Conclusions
+
+Once again in interest of brevity, discussion on the tests will be omitted in the write up - hopefully, the comments left in the testing file will speak for themselves. Similarly, the isolated examples found in neighborFunctions.r should serve as a nice way to eyeball correctness. Overall, I am fairly pleased with the results from my implantation. The small examples output exactly as expected, and while the larger ones are fairly messy, they do run adn match up with what I'd expect. 
+
+
+## Works Cited: 
+
+Trees, Reconstructing Phylogenetic. "The neighbor-joining method: a new method for." Mol Biol Evol 4.4 (1987): 406-425.
+
+Wikipedia contributors. "Neighbor joining." Wikipedia, The Free Encyclopedia. Wikipedia, The Free Encyclopedia, 21 Aug. 2025. Web. 14 Dec. 2025. 
+
+
+
+
+
